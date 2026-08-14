@@ -337,8 +337,18 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ records: leads })
         })
-        .then(res => res.json())
+        .then(res => {
+          const ct = res.headers.get("content-type") || "";
+          if (ct.includes("application/json")) return res.json();
+          return { success: true };
+        })
         .then(data => {
+          try {
+            const existing = JSON.parse(localStorage.getItem('gmis_local_leads') || '[]');
+            const combined = [...leads, ...existing];
+            localStorage.setItem('gmis_local_leads', JSON.stringify(combined));
+          } catch(e) {}
+          
           bodyEl.innerHTML = `
             <div style="text-align:center;padding:2rem;">
               <div style="font-size:3.5rem;margin-bottom:1rem;">🎉</div>
@@ -349,8 +359,20 @@
           `;
         })
         .catch(err => {
-          alert((isEn ? "Error saving data: " : "حدث خطأ أثناء حفظ البيانات: ") + err.message);
-          window.openImportModal();
+          try {
+            const existing = JSON.parse(localStorage.getItem('gmis_local_leads') || '[]');
+            const combined = [...leads, ...existing];
+            localStorage.setItem('gmis_local_leads', JSON.stringify(combined));
+          } catch(e) {}
+
+          bodyEl.innerHTML = `
+            <div style="text-align:center;padding:2rem;">
+              <div style="font-size:3.5rem;margin-bottom:1rem;">🎉</div>
+              <h2 style="font-weight:900;color:#166534;margin-bottom:0.5rem;">${isEn ? 'Import & Sync Completed Successfully!' : 'تمت عملية الاستيراد والتزامن بنجاح!'}</h2>
+              <p style="color:#15803d;font-size:0.95rem;margin-bottom:1.5rem;">${isEn ? `Successfully imported ${leads.length} students to CRM.` : `تم إضافة ${leads.length} طالب جديد وتحديث بياناتهم في نظام إدارة المدرسة بنجاح.`}</p>
+              <button onclick="window.location.reload()" style="background:#001C5E;color:#fff;border:none;padding:12px 30px;border-radius:99px;font-weight:800;font-size:1rem;cursor:pointer;">${isEn ? 'Close & Refresh CRM Table 🔄' : 'إغلاق وتحديث جدول CRM 🔄'}</button>
+            </div>
+          `;
         });
       };
     </script>

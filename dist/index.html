@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GMIS School CRM</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script type="module" crossorigin src="./assets/index-CJR2Gsgz.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-B5U99hBE.css">
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- Student Import Modal & Clean DOM Observer -->
+    <script>
+      // Helper function to extract column value case-insensitively from Excel row
+      window.getExcelColVal = function(row, aliases) {
+        if (!row) return '';
+        const keys = Object.keys(row);
+        for (const alias of aliases) {
+          const cleanAlias = alias.trim().toLowerCase();
+          const foundKey = keys.find(k => {
+            const cleanK = k.trim().toLowerCase();
+            return cleanK === cleanAlias || cleanK.includes(cleanAlias);
+          });
+          if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null) {
+            return String(row[foundKey]).trim();
+          }
+        }
+        return '';
+      };
+
+      // 1. Safe DOM Observer to insert "Import Students" button next to "Export CSV"
+      (function() {
+        function injectImportButton() {
+          if (document.getElementById('gmis-btn-import-excel')) return;
+
+          const buttons = Array.from(document.querySelectorAll('button'));
+          const exportBtn = buttons.find(b => {
+            const text = (b.textContent || '').trim();
+            return text.includes('Export CSV') || text.includes('تصدير CSV');
+          });
+
+          if (exportBtn && exportBtn.parentNode) {
+            const isEn = localStorage.getItem('gmis_language') === 'en';
+
+            const btn = document.createElement('button');
+            btn.id = 'gmis-btn-import-excel';
+            btn.className = 'btn btn-outline btn-sm';
+            btn.style.cssText = 'color:#10b981;border-color:rgba(16,185,129,0.4);background:rgba(16,185,129,0.08);font-weight:700;display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0 4px;';
+            
+            btn.innerHTML = '📥 ' + (isEn ? 'Import Students' : 'استيراد الطلاب');
+            btn.onclick = function(e) {
+              e.preventDefault();
+              if (window.openImportModal) window.openImportModal();
+            };
+
+            exportBtn.parentNode.insertBefore(btn, exportBtn.nextSibling);
+          }
+        }
+
+        const observer = new MutationObserver(injectImportButton);
+        observer.observe(document.body, { childList: true, subtree: true });
+        document.addEventListener('DOMContentLoaded', injectImportButton);
+        setInterval(injectImportButton, 500);
+      })();
+
+      // 2. Bilingual Import Modal Handler with Custom Mapping & Status Classification Rules
+      window.openImportModal = function() {
+        let existingModal = document.getElementById('import-modal-overlay');
+        if (existingModal) existingModal.remove();
+
+        const isEn = localStorage.getItem('gmis_language') === 'en';
+
+        const modalHtml = `
+          <div id="import-modal-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1.5rem;" dir="${isEn ? 'ltr' : 'rtl'}">
+            <div style="background:#fff;border-radius:24px;max-width:820px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);border:1px solid #e5e7eb;padding:2rem;position:relative;font-family:system-ui,-apple-system,sans-serif;color:#1e293b;">
+              
+              <!-- Header -->
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;border-bottom:1px solid #f1f5f9;padding-bottom:1rem;">
+                <div>
+                  <h2 style="font-size:1.4rem;font-weight:800;color:#001C5E;margin:0 0 4px 0;">
+                    ${isEn ? '📥 Import Student Data (Excel / CSV)' : '📥 استيراد بيانات الطلاب من ملف إكسل (Excel / CSV)'}
+                  </h2>
+                  <p style="font-size:0.85rem;color:#64748b;margin:0;">
+                    ${isEn ? 'Upload student Excel file with automatic field mapping & CRM pipeline status classification' : 'قم برفع ملف إكسل الطلاب لمزامنتهم وتصنيفهم تلقائياً في الـ CRM وتسجيل الطلاب'}
+                  </p>
+                </div>
+                <button onclick="document.getElementById('import-modal-overlay').remove()" style="background:#f1f5f9;border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:1.2rem;font-weight:bold;color:#64748b;display:flex;align-items:center;justify-content:center;">✕</button>
+              </div>
+
+              <!-- Body Container -->
+              <div id="import-modal-body">
+                <!-- Dropzone -->
+                <div id="import-dropzone" style="border:2px dashed #cbd5e1;border-radius:16px;padding:3rem 2rem;text-align:center;background:#f8fafc;cursor:pointer;transition:all 0.2s;" onclick="document.getElementById('import-file-input').click()">
+                  <div style="font-size:3rem;margin-bottom:1rem;">📊</div>
+                  <h3 style="font-size:1.1rem;font-weight:700;color:#001C5E;margin-bottom:0.5rem;">
+                    ${isEn ? 'Select or Drag & Drop Excel file here' : 'اختر أو اسحب ملف الإكسل هنا'}
+                  </h3>
+                  <p style="font-size:0.85rem;color:#64748b;margin-bottom:1.25rem;">
+                    ${isEn ? 'Supports (.xlsx, .xls, .csv) - Auto mapping: Registered -> Registered, pending -> Interested' : 'يدعم (.xlsx, .xls, .csv) - مطابقة الأسماء والحالات: Registered -> Registered، pending -> Interested'}
+                  </p>
+                  <button style="background:#001C5E;color:#fff;border:none;padding:10px 24px;border-radius:99px;font-weight:700;font-size:0.9rem;cursor:pointer;">
+                    ${isEn ? 'Choose Excel File' : 'اختر ملف الإكسل'}
+                  </button>
+                  <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="window.handleImportFileSelect(event)">
+                </div>
+              </div>
+
+            </div>
+          </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+      };
+
+      window.handleImportFileSelect = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const isEn = localStorage.getItem('gmis_language') === 'en';
+        const bodyEl = document.getElementById('import-modal-body');
+        bodyEl.innerHTML = `<div style="text-align:center;padding:2rem;"><div style="font-size:2rem;margin-bottom:1rem;">⏳</div><h3>${isEn ? 'Reading and processing file...' : 'جاري قراءة ومعالجة الملف...'}</h3></div>`;
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          try {
+            let records = [];
+            const data = evt.target.result;
+            if (file.name.endsWith('.csv')) {
+              records = window.parseCSVData(data);
+            } else if (window.XLSX) {
+              const workbook = XLSX.read(data, { type: 'binary' });
+              const sheetName = workbook.SheetNames[0];
+              records = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+            } else {
+              records = window.parseCSVData(data);
+            }
+
+            window.renderImportPreview(records, file.name);
+          } catch(err) {
+            alert((isEn ? "Error reading file: " : "خطأ في قراءة ملف الإكسل: ") + err.message);
+            window.openImportModal();
+          }
+        };
+
+        if (file.name.endsWith('.csv')) {
+          reader.readAsText(file, 'UTF-8');
+        } else {
+          reader.readAsBinaryString(file);
+        }
+      };
+
+      window.parseCSVData = function(text) {
+        const lines = text.split('\n').filter(l => l.trim().length > 0);
+        if (lines.length === 0) return [];
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+        const records = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+          const rec = {};
+          headers.forEach((h, idx) => {
+            rec[h] = cols[idx] || '';
+          });
+          records.push(rec);
+        }
+        return records;
+      };
+
+      window.renderImportPreview = function(rawRecords, fileName) {
+        const isEn = localStorage.getItem('gmis_language') === 'en';
+        const bodyEl = document.getElementById('import-modal-body');
+        
+        // Map fields based on exact requirements:
+        // 1. Full Student Name = First Name + Last Name
+        // 2. Parent Name = Middle Name + Last Name
+        // 3. Grade Level = الصف الدراسي
+        // 4. Nationality = الجنسية
+        // 5. Phone = رقم الهاتف
+        // 6. Email = الأيميل
+        // 7. Address = العنوان
+        // 8. Passport = رقم جواز الطالب
+        // 9. Channel = كيف سمعت عنا
+        // 10. Status classification: Registered -> registered (Registered), pending -> interested (Interested)
+        const mappedLeads = rawRecords.map((r, i) => {
+          const firstName = window.getExcelColVal(r, ['الاسم الأول', 'الاسم الاول', 'first name', 'firstname', 'given name']);
+          const middleName = window.getExcelColVal(r, ['الاسم الأوسط', 'الاسم الاوسط', 'middle name', 'middlename']);
+          const lastName = window.getExcelColVal(r, ['الاسم الأخير', 'الاسم الاخير', 'last name', 'lastname', 'surname', 'family name']);
+
+          // Full Student Name = First Name + Last Name
+          let studentName = '';
+          if (firstName || lastName) {
+            studentName = (firstName + ' ' + lastName).trim();
+          } else {
+            studentName = window.getExcelColVal(r, ['اسم الطالب كامل', 'اسم الطالب', 'الاسم', 'student name', 'name', 'full name']);
+          }
+
+          // Parent Name = Middle Name + Last Name
+          let parentName = '';
+          if (middleName || lastName) {
+            parentName = (middleName + ' ' + lastName).trim();
+          } else {
+            parentName = window.getExcelColVal(r, ['اسم ولي الأمر', 'اسم ولي الامر', 'ولي الأمر', 'parent name', 'guardian name']);
+          }
+
+          // Grade Level
+          const grade = window.getExcelColVal(r, ['الصف الدراسي', 'الصف', 'المرحلة الدراسية', 'grade', 'grade level', 'class']) || 'G10';
+
+          // Nationality
+          const studentNationality = window.getExcelColVal(r, ['الجنسية', 'الجنسيه', 'جنسية الطالب', 'nationality', 'student nationality']);
+
+          // Passport / National ID Number
+          const passport = window.getExcelColVal(r, ['رقم جواز الطالب', 'رقم الجواز', 'جواز الطالب', 'رقم الهوية', 'الهوية', 'passport', 'passport number', 'student passport', 'national id', 'id number']);
+
+          // Phone Number
+          const phone = window.getExcelColVal(r, ['رقم الهاتف', 'الهاتف', 'الجوال', 'الموبايل', 'رقم الجوال', 'phone', 'phone number', 'mobile']);
+
+          // Email
+          const email = window.getExcelColVal(r, ['الأيميل', 'الايميل', 'البريد الإلكتروني', 'البريد الالكتروني', 'email', 'e-mail']);
+
+          // Address
+          const address = window.getExcelColVal(r, ['العنوان', 'السكن', 'العنوان/السكن', 'العنوان السكني', 'address', 'city', 'home address']);
+
+          // Channel / How did you hear about us
+          const channel = window.getExcelColVal(r, ['كيف سمعت عنا', 'كيف سمعت عنا؟', 'مصدر المعرفة', 'القناة', 'channel', 'source', 'how did you hear about us']) || 'excel_import';
+
+          // Application Date / Birth Date
+          const appDate = window.getExcelColVal(r, ['تاريخ التقديم', 'تاريخ الميلاد', 'birth date', 'application date', 'date']);
+
+          // Status Classification Rule:
+          // Registered -> registered
+          // pending -> interested
+          const rawStatus = window.getExcelColVal(r, ['الحالة', 'حالة الطالب', 'status', 'state']).toLowerCase();
+          let status = 'interested';
+          if (rawStatus.includes('registered') || rawStatus.includes('مسجل') || rawStatus.includes('تسجيل')) {
+            status = 'registered';
+          } else if (rawStatus.includes('pending') || rawStatus.includes('معلق') || rawStatus.includes('مهتم') || rawStatus.includes('interested')) {
+            status = 'interested';
+          } else if (rawStatus.includes('new') || rawStatus.includes('جديد')) {
+            status = 'new';
+          } else if (rawStatus.includes('following') || rawStatus.includes('متابعة')) {
+            status = 'following';
+          }
+
+          return {
+            id: 'import_' + Date.now() + '_' + i,
+            name: String(studentName).trim() || (isEn ? 'Student ' + (i + 1) : 'طالب مجهول ' + (i + 1)),
+            parent_name: String(parentName).trim(),
+            phone: String(phone).trim(),
+            grade: String(grade).trim(),
+            student_nationality: String(studentNationality).trim(),
+            student_passport: String(passport).trim(),
+            email: String(email).trim(),
+            address: String(address).trim(),
+            channel: String(channel).trim(),
+            status: status,
+            notes: appDate ? `تاريخ التقديم: ${appDate}` : '',
+            photo_url: '',
+            passport_photo_url: '',
+            created_at: new Date().toISOString()
+          };
+        });
+
+        window.pendingImportLeads = mappedLeads;
+
+        bodyEl.innerHTML = `
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;padding:1rem;border-radius:12px;margin-bottom:1.5rem;">
+              <div>
+                <span style="font-weight:800;color:#166534;">
+                  ${isEn ? `✅ Recognized ${mappedLeads.length} student records ready for sync` : `✅ تم التعرف على ${mappedLeads.length} سجل طلاب جاهز للمزامنة`}
+                </span>
+                <div style="font-size:0.8rem;color:#15803d;margin-top:2px;">${isEn ? 'File Name: ' : 'اسم الملف: '}${fileName}</div>
+              </div>
+              <button onclick="window.confirmAndDispatchImport()" style="background:#16a34a;color:#fff;border:none;padding:10px 20px;border-radius:10px;font-weight:800;cursor:pointer;">
+                ${isEn ? 'Start Importing & Syncing 🚀' : 'بدء استيراد ومزامنة البيانات 🚀'}
+              </button>
+            </div>
+
+            <!-- Preview Table -->
+            <div style="overflow-x:auto;max-height:340px;border:1px solid #e2e8f0;border-radius:12px;">
+              <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead style="background:#f8fafc;position:sticky;top:0;">
+                  <tr>
+                    <th style="padding:10px;text-align:start;border-bottom:1px solid #cbd5e1;">#</th>
+                    <th style="padding:10px;text-align:start;border-bottom:1px solid #cbd5e1;">${isEn ? 'Student Name (1+3)' : 'اسم الطالب كامل (الاسم 1+3)'}</th>
+                    <th style="padding:10px;text-align:start;border-bottom:1px solid #cbd5e1;">${isEn ? 'Parent Name (2+3)' : 'اسم ولي الأمر (الاسم 2+3)'}</th>
+                    <th style="padding:10px;text-align:start;border-bottom:1px solid #cbd5e1;">${isEn ? 'Phone' : 'رقم الهاتف'}</th>
+                    <th style="padding:10px;text-align:start;border-bottom:1px solid #cbd5e1;">${isEn ? 'Grade' : 'الصف'}</th>
+                    <th style="padding:10px;text-align:start;border-bottom:1px solid #cbd5e1;">${isEn ? 'Passport' : 'جواز الطالب'}</th>
+                    <th style="padding:10px;text-align:start;border-bottom:1px solid #cbd5e1;">${isEn ? 'Pipeline Status' : 'حالة الـ CRM'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${mappedLeads.slice(0, 15).map((l, idx) => `
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                      <td style="padding:10px;color:#94a3b8;">${idx + 1}</td>
+                      <td style="padding:10px;font-weight:700;color:#0f172a;">${l.name}</td>
+                      <td style="padding:10px;color:#334155;">${l.parent_name || '-'}</td>
+                      <td style="padding:10px;color:#334155;direction:ltr;text-align:start;">${l.phone || '-'}</td>
+                      <td style="padding:10px;color:#334155;">${l.grade}</td>
+                      <td style="padding:10px;color:#334155;">${l.student_passport || '-'}</td>
+                      <td style="padding:10px;">
+                        <span style="background:${l.status === 'registered' ? '#dcfce7' : '#fef3c7'};color:${l.status === 'registered' ? '#15803d' : '#d97706'};font-weight:800;font-size:0.75rem;padding:3px 10px;border-radius:99px;">
+                          ${l.status === 'registered' ? (isEn ? 'Registered' : 'Registered (مسجل)') : (isEn ? 'Interested' : 'Interested (مهتم/pending)')}
+                        </span>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            ${mappedLeads.length > 15 ? `<div style="font-size:0.75rem;color:#64748b;margin-top:8px;text-align:center;">${isEn ? `...and ${mappedLeads.length - 15} more students will be imported` : `...و هناك ${mappedLeads.length - 15} طالب إضافي سيتم استيرادهم`}</div>` : ''}
+          </div>
+        `;
+      };
+
+      window.confirmAndDispatchImport = function() {
+        const isEn = localStorage.getItem('gmis_language') === 'en';
+        const leads = window.pendingImportLeads || [];
+        if (leads.length === 0) return;
+
+        const bodyEl = document.getElementById('import-modal-body');
+        bodyEl.innerHTML = `
+          <div style="text-align:center;padding:3rem 1rem;">
+            <div style="font-size:2.5rem;margin-bottom:1rem;">⏳</div>
+            <h3 style="font-weight:800;color:#001C5E;">${isEn ? `Syncing ${leads.length} students to CRM...` : `جاري حفظ واستيراد ${leads.length} طالب إلى نظام CRM...`}</h3>
+            <div style="width:100%;background:#e2e8f0;border-radius:99px;height:10px;margin:1.5rem 0;overflow:hidden;">
+              <div style="width:100%;height:100%;background:#10b981;animation:progressAnim 1.5s ease-in-out infinite;"></div>
+            </div>
+          </div>
+        `;
+
+        fetch('/api/students/import-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ records: leads })
+        })
+        .then(res => res.json())
+        .then(data => {
+          bodyEl.innerHTML = `
+            <div style="text-align:center;padding:2rem;">
+              <div style="font-size:3.5rem;margin-bottom:1rem;">🎉</div>
+              <h2 style="font-weight:900;color:#166534;margin-bottom:0.5rem;">${isEn ? 'Import & Sync Completed Successfully!' : 'تمت عملية الاستيراد والتزامن بنجاح!'}</h2>
+              <p style="color:#15803d;font-size:0.95rem;margin-bottom:1.5rem;">${isEn ? `Successfully imported ${leads.length} students to CRM.` : `تم إضافة ${leads.length} طالب جديد وتحديث بياناتهم في نظام إدارة المدرسة بنجاح.`}</p>
+              <button onclick="window.location.reload()" style="background:#001C5E;color:#fff;border:none;padding:12px 30px;border-radius:99px;font-weight:800;font-size:1rem;cursor:pointer;">${isEn ? 'Close & Refresh CRM Table 🔄' : 'إغلاق وتحديث جدول CRM 🔄'}</button>
+            </div>
+          `;
+        })
+        .catch(err => {
+          alert((isEn ? "Error saving data: " : "حدث خطأ أثناء حفظ البيانات: ") + err.message);
+          window.openImportModal();
+        });
+      };
+    </script>
+  </body>
+</html>
